@@ -1,0 +1,841 @@
+\documentclass{beamer}
+\usetheme{metropolis}
+%\setsansfont[BoldFont={Fira Sans SemiBold}]{Fira Sans Book}
+%\setsansfont{Fontin}
+%\setsansfont{Gillius ADF No2}
+%\setsansfont{Phetsarath OT}
+\setsansfont{Source Sans Pro}
+\setmonofont{Source Code Pro}
+
+\hypersetup{colorlinks=true,
+            linkcolor=mRustLightOrange,
+            menucolor=mRustLightOrange,
+            pagecolor=mRustLightOrange,
+            urlcolor=mRustLightOrange}
+\usepackage{csquotes}
+\usepackage{comment}
+\usepackage{xcolor}
+\usepackage{minted}
+\usepackage{mathtools}
+
+\newfontfamily\codefont{Source Code Pro}
+\newcommand\code[1]{\,{\color[HTML]{884400}#1}\,}
+\newcommand\source[1]{$\rightarrow$ via #1}
+
+\title{Concurrency}
+\date{\today}
+\author{Lukas Prokop}
+\institute{RustGraz community\vfill\hfill\includegraphics[height=2cm]{images/rustacean-orig-noshadow.png}}
+\begin{document}
+\maketitle
+
+\section{Prologue}
+
+\begin{frame}[fragile]{Recap: Rusty days}
+  \begin{center}
+    \includegraphics[width=.9\textwidth]{images/rdconf.jpeg}
+  \end{center}
+  \begin{itemize}
+    \item Webference organized by \href{https://rusty-days.org/}{Rust Wrocław}
+    \item 8 talks between 2020-07-27 and 2020-07-31
+    \item I will give a short talk summary
+  \end{itemize}
+\end{frame}
+
+\begin{frame}[standout]
+  Mon, 2020-07-27 --- Steve Klabnik \\
+  \enquote{Should we have a Rust 2021 edition?}
+\end{frame}
+
+\begin{frame}[fragile]{Recap: Rust 2021 edition Talk}
+rustc is a multi-pass compiler: AST → HIR → MIR → LLVM-IR
+  \begin{description}
+    \item[HIR] expand source code to simpler primitive statements (type checking, method lookup)
+    \item[MIR] is all about control flow (control-flow, borrow checking)
+  \end{description}
+  \begin{itemize}
+    \item \emph{lowering}: \enquote{The MIR is then lowered to LLVM-IR}
+    \item \enquote{cargo check} omits code generation step
+    \item \emph{goal}: \enquote{query-based} compiler (memoized answers)
+    \item editions are not allowed to differ in MIR
+  \end{itemize}
+  \begin{description}
+    \item[nightly release] every night
+    \item[stable + beta release] every six weeks
+  \end{description}
+\end{frame}
+
+\begin{frame}[fragile]{Recap: Rust 2021 edition Talk}
+  \textbf{Editions:}
+  \begin{description}
+    \item[is] longer-term progress, breaking changes, new editions are opt-in, can't change everything
+    \item[can] can {introduce new keywords, repurpose syntax (e.g. deprecate trait, introduce dyn trait)}
+    \item[cannot] cannot {change coherence rules, standard library}
+  \end{description}
+  \begin{itemize}
+    \item when do editions happen? no policy
+    \item edition 2018 (= rust 1.31) was \enquote{a really big project for the various teams} and \enquote{a lot of burnout amongst contributors} (\enquote{I was a total mess})
+    \item editions feature-driven or time-boxed? time-boxed! 3 years is a nice compromise between yearly and 5-year releases
+    \item Steve: We should have a 2021 edition. Much smaller than 2018.
+  \end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]{Recap: Rust 2021 edition Talk}
+  \begin{minted}[fontsize=\small]{text}
+meisterluk@gardner ~ % cat test.rs
+fn async() -> u64 {
+    42
+}
+
+fn main() {
+    println!("{}", async());
+}
+
+meisterluk@gardner ~ % rustc test.rs
+  \end{minted}
+\end{frame}
+
+\begin{frame}[fragile]{Recap: Rusty days}
+  \begin{minted}[fontsize=\small]{text}
+meisterluk@gardner ~ % rustc --edition=2018 test.rs
+error: expected identifier, found keyword `async`
+ --> test.rs:1:4
+  |
+1 | fn async() -> u64 {
+  |    ^^^^^ expected identifier, found keyword
+  |
+help: you can escape reserved keywords
+      to use them as identifiers
+  |
+1 | fn r#async() -> u64 {
+  |    ^^^^^^^
+  \end{minted}
+\end{frame}
+
+\begin{frame}[standout]
+  Mon, 2020-07-27 --- Michalina Kotwica \\
+  \enquote{Low-level optimization of algebraic and similar structures}
+\end{frame}
+
+\begin{frame}[fragile]{Recap: Low-level optimization Talk}
+  \begin{itemize}
+    \item type algebra
+    \item unit \& never type
+    \item memory layout (ABI) of composite types (struct, enum, futures)
+    \item struct Bar(u16, u8, u16, u8): \\
+          \texttt{C:    11 11 33 xx 22 22 44 xx}
+          \texttt{Rust: 11 11 22 22 33 44}  (fields reordered)
+    \item \mintinline{rust}{Option} uses a discriminator, \mintinline{rust}{Option<Option<u64>>} uses only one discriminator
+    \item 41.2~\% of enums have no type arguments, 16.4~\% of enums have one type argument, 23.7~\% of enums have two type arguments
+  \end{itemize}
+\end{frame}
+
+\begin{frame}[standout]
+  Tue, 2020-07-28 --- Peter Parkanyi \\
+  \enquote{Fast encrypted backups with Rust - \enquote{How I stopped worrying and love mmap}}
+\end{frame}
+
+\begin{frame}[fragile]{Recap: Fast encrypted backups Talk}
+  \url{https://github.com/rsdy/zerostash}
+  \begin{itemize}
+    \item End-to-End Encryption
+    \item latency and throughput
+    \item Zero-metadata data stash: deduplicated, works as a file system and key/value store
+    \item Cryptographic primitives:
+      \begin{description}
+        \item[Passwords] Argon2
+        \item[Indexing] Blake2
+        \item[Compression] LZ4
+        \item[Encryption] ChaCha20-Poly1305
+        \item[Deduplication] SeaHash
+      \end{description}
+    \item Profiling: perf on Linux, Instruments on macOS
+    \item mmap versus read
+  \end{itemize}
+\end{frame}
+
+\begin{frame}[standout]
+  Wed, 2020-07-29 --- Lachezar Lechev \\
+  \enquote{Drone Control - \enquote{Controlling a drone using Rust over WiFi}}
+\end{frame}
+
+\begin{frame}[fragile]{Recap: Drone Control Talk}
+  \url{https://github.com/AeroRust/Welcome}
+  \begin{itemize}
+    \item TCP connections {Handshake, establish connection}
+    \item JSON requests \& responses
+    \item ping-pong within 7s
+    \item \href{https://crates.io/crates/scroll}{scroll} crate: \enquote{A suite of powerful, extensible, generic, endian-aware Read/Write traits for byte buffers}
+  \end{itemize}
+\end{frame}
+
+\begin{frame}[standout]
+  Wed, 2020-07-29 --- Nell Shamrell - Harrington \\
+  \enquote{The Rust Borrow Checker - A Deep Dive}
+\end{frame}
+
+\begin{frame}[fragile]{Recap: Drone Control Talk}
+  \href{https://www.slideshare.net/NellShamrell/the-rust-borrow-checker}{Slides on slideshare}
+  \begin{itemize}
+    \item \enquote{Is the Borrow Checker a friend or a foe?}
+    \item Stages of Compilation:
+      \begin{enumerate}
+        \item Lexical Analysis
+        \item Parsing
+        \item Semantic Analysis (Borrow Checker!)
+        \item Optimization
+        \item Code Generation
+      \end{enumerate}
+    \item BC tracks initializations/moves and applies lifetime inference
+    \item Lifetime of a variable has two definitions
+      \begin{itemize}
+        \item \enquote{Span of time before the value of a variable gets freed}
+        \item \enquote{scope of a variable}
+      \end{itemize}
+    \item \enquote{If you make a reference to a value, the lifetime of that reference cannot outlive the scope of the value}
+    \item \url{https://rustc-dev-guide.rust-lang.org/}
+  \end{itemize}
+\end{frame}
+
+\begin{frame}[standout]
+  Thu, 2020-07-30 - Jan-Erik Rediger \\
+  \enquote{Leveraging Rust to build cross-platform mobile libraries}
+\end{frame}
+
+\begin{frame}[fragile]{Recap: Mobile Libraries Talk}
+  \href{https://www.slideshare.net/NellShamrell/the-rust-borrow-checker}{Slides on slideshare}
+  \begin{itemize}
+    \item \href{https://telemetry.mozilla.org/}{Firefox Telemetry project}
+    \item Collect performance metrics for our products, package pings at controlled schedules
+    \item Three Principles
+      \begin{itemize}
+        \item Stay Lean
+        \item Build Security
+        \item Engage Your Users
+      \end{itemize}
+    \item Telemetry \emph{scalars}: \texttt{Scalars.yaml} (metadata: bug\_numbers, description, expires, notification\_emails, \dots)
+  \end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]{Recap: Mobile Libraries Talk}
+  \begin{itemize}
+    \item Glean core → Glean FFI → Glean Kotlin/Swift → Android/iOS app
+    \item \href{https://crates.io/crates/cbindgen}{cbindgen} crate: \enquote{A tool for generating C bindings to Rust code.}
+    \item 10 Glean compilation targets supported
+    \item Hello World with JNI (also see Otavio Pace's talk)
+    \item tagged unions are generated by bindgen for rust enums
+    \item ProtoBuf to serialize data
+    \item R8 minifies/optimizes JVM bytecode (successor to proguard)
+    \item here: only invoke Rust code from Kotlin (never the other way around)
+  \end{itemize}
+\end{frame}
+
+\begin{frame}[standout]
+  Fri, 2020-07-31 - Luca Palmieri \\
+  \enquote{Are we observable yet? Telemetry for Rust APIs - metrics, logging, distributed tracing}
+\end{frame}
+
+\begin{frame}[fragile]{Recap: Telemetry for Rust APIs Talk}
+  \begin{itemize}
+    \item Developer of \href{https://www.donatedirect.org.au/who-we-are.html}{DonateDirect}
+    \item New project: fast versus reliable (metrics, tracing, logs, \dots)
+    \item Claim: convenience beats correctness
+    \item Metrics give us an aggregate picture of the system state
+    \item \href{https://crates.io/crates/actix-web-prom}{actix\_web\_prom} crate provides a pluggable middleware with standard Prometheus metrics out of the box
+    \item \href{https://docs.rs/log/0.4.6/log/}{log} crate and \href{https://crates.io/crates/tracing}{tracing} crate to dump structured logging with JSON output and forward spans to \href{https://www.elastic.co/what-is/elasticsearch}{elasticsearch} and then \href{https://www.elastic.co/kibana}{kibana}
+  \end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]{Recap: Telemetry for Rust APIs Talk}
+  \textbf{Key takeaways:}
+  \begin{itemize}
+  \item Lack of telemetry is a ticking bomb
+  \item Diagnostic instrumentation has to be easy
+  \item Metrics to alert and monitor system state
+  \item High cardinality is key to being able to detect and triage unknown unknowns
+  \item Span as unit of work abstraction
+  \item You must be able to trace a request across different services
+  \end{itemize}
+\end{frame}
+
+\begin{frame}[standout]
+  Fri, 2020-07-31 --- Tim McNamara \\
+  \enquote{How 10 open source projects manage unsafe code}
+\end{frame}
+
+\begin{frame}[fragile]{Recap: Managing unsafe code Talk}
+  \textbf{Unsafe guidelines for the impatient:}
+  \begin{itemize}
+    \item Use \mintinline{rust}{#[deny(unsafe_code)]}
+    \item Add comments to all unsafe blocks
+    \item Let someone read the unsafe block comment. \\
+          If they cannot explain afterwards, revise the comment
+  \end{itemize}
+
+  \textbf{Remarks:}
+  \begin{itemize}
+    \item Question \texttt{unsafe}! Look for safe alternatives
+    \item rust std: \enquote{Unsafe code block need a comment explaining why they're ok}
+    \item \enquote{We try to create a situation where we, as a team, are building safe software and we are mentally switched on if we go to the unsafe module}
+    \item \href{https://github.com/rust-lang/unsafe-code-guidelines}{UCG WG - Rust's Unsafe Code Guidelines Working Group}
+  \end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]{Recap: Managing unsafe code Talk}
+  \begin{itemize}
+    \item \texttt{actix\_web} \href{https://github.com/rust-user-group-graz/07-unsafe}{incident}
+    \item \mintinline{rust}{#[deny(unsafe_code)]} and \mintinline{rust}{#[allow(unsafe_code)]} (can be nested)
+    \item \href{https://crates.io/crates/cargo-geiger}{cargo-geiger} \enquote{detects usage of unsafe Rust in a Rust crate and its deps}, introduces \mintinline{rust}{#![forbid(unsafe_code)]}
+    \item \href{https://crates.io/crates/exa}{exa} uses syscalls natively, \href{https://crates.io/crates/blake3}{BLAKE3} uses SIMD instructions, \href{https://crates.io/crates/firecracker}{Firecracker} interacts with a hybervisor, \href{https://gitlab.gnome.org/GNOME/librsvg}{librsvg} talks to GLib, \href{https://crates.io/crates/toolshed}{toolshed} deals with pointers in one module, \href{https://terminusdb.com/}{terminusdb} interacts with Prolog, \href{https://fuchsia.dev/}{Fuchsia OS} interacts with the non-rust kernel
+  \end{itemize}
+\end{frame}
+
+
+
+\section{Dialogue}
+
+\begin{frame}[standout]
+  Concurrency
+\end{frame}
+
+\begin{frame}[fragile]{Definition: concurrency}
+  \begin{quote}
+    In computer science, \emph{concurrency} is the ability of different parts or units of a program, algorithm, or problem to be executed out-of-order or in partial order, without affecting the final outcome. \\
+    ---\href{https://en.wikipedia.org/w/index.php?title=Concurrency_(computer_science)&oldid=971297468}{Concurrency (computer science)}
+  \end{quote}
+\end{frame}
+
+\begin{frame}[fragile]{Definition: parallelism}
+  \begin{quote}
+    \emph{Parallel computing} is a type of computation in which many calculations or the execution of processes are carried out simultaneously. \\
+    ---\href{https://en.wikipedia.org/w/index.php?title=Parallel_computing&oldid=961837202}{Parallel computing}
+  \end{quote}
+\end{frame}
+
+\begin{frame}[fragile]{Models of concurrency}
+  Formally, different models exist:
+  \begin{itemize}
+    \item Parallel random-access machine
+    \item Actor model
+    \item Petri nets
+    \item Process calculi (CCS, CSP, $\pi$-calculus)
+    \item Tuple spaces
+    \item Simple Concurrent Object-Oriented Programming (CSOOP)
+    \item Reo Coordination Language
+  \end{itemize}
+  \dots\ to design distributed systems.
+\end{frame}
+
+\begin{frame}[fragile]{Models of concurrency}
+  For example, Erlang is famous for its distributed computational model.
+
+  But, in rust, we stick to a von-Neumann-like model:
+  \begin{itemize}
+    \item Instructions are executed in order.
+    \item We have stacks, heaps, bss and data sections to organize the memory.
+    \item We make syscalls to the kernel and compile against some ISA.
+  \end{itemize}
+  Thus it is a question of an API. We define \emph{concurrent units} and they might run in \emph{parallel}.
+\end{frame}
+
+\begin{frame}[fragile]{Definition: concurrency}
+  Concurrency as a question of level of granularity:
+  \begin{enumerate}
+    \item Instruction
+    \item blocks of instructions
+    \item Function
+    \item Several stacks, one heap
+    \item Process
+  \end{enumerate}
+  In general: performance as incentive.
+\end{frame}
+
+\begin{frame}[fragile]{Problems of concurrency}
+  \begin{enumerate}
+    \item Data dependency (synchronization problem)
+      \begin{description}
+        \item[let] A and B be two concurrent units. \\
+          Both want to increment $x$
+        \item[A] reads that $x$ is $41$
+        \item[B] reads that $x$ is $41$
+        \item[A] increments $x$ and gets $y \coloneqq 42$
+        \item[B] increments $x$ and gets $z \coloneqq 42$
+        \item[A] writes $x \coloneqq y$
+        \item[B] writes $x \coloneqq z$
+        \item[$\mathbf x$] is 42
+      \end{description}
+    \item Concurrent units need to exchange messages
+    \item Concurrent unit waits for an event
+    \item Interrupt concurrent unit (\emph{preemption})
+    \item Determine concurrent unit has finished
+  \end{enumerate}
+\end{frame}
+
+\begin{frame}[standout]
+  In rust (from low-level to high-level)
+\end{frame}
+
+\begin{frame}[standout]
+  On instruction-level
+\end{frame}
+
+\begin{frame}[fragile]{SIMD instructions}
+  SIMD = \textbf{s}ingle \textbf{i}nstruction, \textbf{m}ultiple \textbf{d}ata
+
+  Run one instruction, apply arithmetic/logic/data-handling/memory instructions to several values simultaneously. 8/16/32/64/128/512
+
+  \begin{description}
+    \item[RISC-V]
+      I prefer to talk about the RISC-V ISA, but RISC-V basically dropped its \href{https://en.wikipedia.org/w/index.php?title=RISC-V&oldid=970523444#Packed_SIMD}{Packed SIMD} extension and develops a new \href{https://riscv.org/specifications/isa-spec-pdf/}{\enquote{P} extension}. Thus, I switch to x86\_64.
+    \item[x86\_64]
+      \href{https://en.wikipedia.org/w/index.php?title=Streaming_SIMD_Extensions&oldid=960385254}{Streaming SIMD Extensions (SSE)} and \href{https://en.wikipedia.org/w/index.php?title=Advanced_Vector_Extensions&oldid=971220867}{Advanced Vector Extensions (AVX)}
+  \end{description}
+\end{frame}
+
+\begin{frame}[fragile]{SSE and AVX}
+  Operands (put into XMM/YMM registers):
+  \begin{description}
+    \item[SSE] four f32
+    \item[SSE2] two f64, two i64, four i32, eight i16, sixteen u8
+    \item[SSE3] (only 13 new instructions)
+    \item[SSE4] (only 54 new instructions)
+    \item[AVX] eight f32, four f64
+    \item[AVX2] 256-bit registers for almost everything
+    \item[AVX-512] 512-bit registers but instructions split into multiple extensions
+  \end{description}
+\end{frame}
+
+\begin{frame}[fragile]{SIMD support}
+  \begin{minted}[fontsize=\small]{text}
+% cat /proc/cpuinfo | grep "sse\|avx"                                :(
+flags   : fpu … sse sse2 … ssse3 … sse4_1 sse4_2
+          … avx … avx2 … flush_l1d
+flags   : fpu … sse sse2 … ssse3 … sse4_1 sse4_2
+          … avx … avx2 … flush_l1d
+flags   : fpu … sse sse2 … ssse3 … sse4_1 sse4_2
+          … avx … avx2 … flush_l1d
+flags   : fpu … sse sse2 … ssse3 … sse4_1 sse4_2
+          … avx … avx2 … flush_l1d
+  \end{minted}
+\end{frame}
+
+\begin{frame}[fragile]{(No) SIMD instructions}
+  \begin{minted}{rust}
+fn foo(a: &[u8], b: &[u8], c: &mut [u8]) {
+    for ((a, b), c) in a.iter().zip(b).zip(c) {
+      println!("{} {} {}", a, b, c);
+        *c = *a + *b;
+    }
+}
+
+fn main() {
+  let a: [u8; 4] = [0xDE, 0xAD, 0xBE, 0xEF];
+  let b: [u8; 4] = [0x00, 0x01, 0x02, 0x03];
+  let mut c = [0u8; 4];
+  foo(&a, &b, &mut c);
+
+  println!("{:?}", c);
+}
+
+  \end{minted}
+\end{frame}
+
+\begin{frame}[fragile]{(No) SIMD instructions}
+  On \href{https://godbolt.org/z/678vhz}{godbolt} with \texttt{-C opt-level=1} (or 0):
+
+  \begin{minted}{nasm}
+.LBB58_2:
+; …
+mov     rdx, qword ptr [rsp + 24]
+movzx   ecx, byte ptr [rcx]
+add     cl, byte ptr [rax]
+mov     byte ptr [rdx], cl
+mov     rdi, r14
+; …
+jne     .LBB58_2
+  \end{minted}
+\end{frame}
+
+\begin{frame}[fragile]{SIMD instructions}
+  On \href{https://godbolt.org/z/eKabj8}{godbolt} with \texttt{-C opt-level=2} (or higher):
+
+  \begin{minted}{nasm}
+movdqu  xmm2, xmmword ptr [rdx + rcx + 32]
+paddb   xmm2, xmm0
+movdqu  xmm0, xmmword ptr [rdx + rcx + 48]
+paddb   xmm0, xmm1
+movdqu  xmmword ptr [r8 + rcx + 32], xmm2
+  \end{minted}
+
+  \href{https://www.felixcloutier.com/x86/paddb:paddw:paddd:paddq}{paddb}: \enquote{add packed integer} instruction
+\end{frame}
+
+\begin{frame}[fragile]{SIMD instructions}
+  via \href{https://doc.rust-lang.org/1.29.0/std/arch/}{std::arch} (\enquote{SIMD and vendor intrinsics module}):
+
+  \begin{minted}[fontsize=\small]{rust}
+#[cfg(all(
+  any(target_arch = "x86", target_arch = "x86_64"),
+  target_feature = "avx2"
+))]
+fn foo() {
+  #[cfg(target_arch = "x86")]
+  use std::arch::x86::_mm256_add_epi64;
+  #[cfg(target_arch = "x86_64")]
+  use std::arch::x86_64::_mm256_add_epi64;
+
+  unsafe {
+    _mm256_add_epi64(...);
+  }
+}
+  \end{minted}
+\end{frame}
+
+\begin{frame}[fragile]{SIMD summary}
+  \begin{itemize}
+    \item rust uses the LLVM stack, which implements \emph{auto-vectorization}
+    \item usually, we get SIMD instructions for free
+    \item sometimes, you want to use the explicitly
+    \item you can always use inline assembly with unsafe (\texttt{\href{https://docs.rs/x86/0.29.0/x86/time/fn.rdtsc.html}{x86::time::rdtsc}})
+    \item \href{https://github.com/rust-lang/packed_simd}{packed\_simd} provides a high-level API
+    \item also: \href{https://crates.io/crates/faster}{faster}, \href{https://crates.io/crates/ssimd}{ssimd}
+    \item mostly, libraries are specific for an application domain, e.g.:
+    \begin{itemize}
+      \item \href{https://github.com/novacrazy/numeric-array}{numeric-array} crate
+      \item \href{https://crates.io/crates/directx_math}{directx\_math} crate
+      \item \href{https://crates.io/crates/pqcrypto-classicmceliece}{pqcrypto-classicmceliece} crate
+    \end{itemize}
+  \end{itemize}
+  % http://huonw.github.io/blog/2015/08/simd-in-rust/ (2015 though!)
+\end{frame}
+
+\begin{frame}[standout]
+  On instruction-level
+\end{frame}
+
+\begin{frame}[standout]
+  On OS thread level
+\end{frame}
+
+\begin{frame}[fragile]{threads}
+  Copy stack, share heap.
+  \begin{itemize}
+    \item rust uses the LLVM stack, which implements \emph{auto-vectorization}
+  \end{itemize}
+\end{frame}
+
+\begin{frame}[standout]
+  async \& await
+\end{frame}
+
+\begin{frame}[fragile]{async \& await}
+  Similar to C\# and JavaScript.
+  \mintinline{rust}{async} keyword. 
+
+  \begin{minted}{rust}
+async fn sub() -> u8 {
+  42u8
+}
+
+fn main() {
+  println!("{}", sub())
+}
+  \end{minted}
+\end{frame}
+
+\begin{frame}[fragile]{async \& await}
+  \begin{minted}[fontsize=\scriptsize]{text}
+meisterluk@gardner ~ % rustc --edition=2018 async1.rs
+error[E0277]: `impl std::future::Future`
+              doesn't implement `std::fmt::Display`
+ --> async1.rs:6:20
+  |
+6 |     println!("{}", sub())
+  |                    ^^^^^ `impl std::future::Future`
+  |      cannot be formatted with the default formatter
+  |
+  = help: the trait `std::fmt::Display` is not implemented for
+    `impl std::future::Future`
+  = note: in format strings you may be able to use `{:?}`
+    (or {:#?} for pretty-print) instead
+  = note: required by `std::fmt::Display::fmt`
+  = note: this error originates in a macro (in Nightly builds,
+    run with -Z macro-backtrace for more info)
+
+error: aborting due to previous error
+
+For more information about this error, try `rustc --explain E0277`.
+  \end{minted}
+\end{frame}
+
+\begin{frame}[fragile]{async \& await}
+  \begin{quote}
+  A \href{https://doc.rust-lang.org/std/future/trait.Future.html}{future} represents a value, that is not ready yet. Eventually, the future resolves to a value. \\
+  ---\href{https://www.youtube.com/watch?v=skos4B5x7qE}{withoutboats} in a Rust Latam talk 2019
+  \end{quote}
+\end{frame}
+
+\begin{frame}[fragile]{async \& await}
+  \mintinline{rust}{await} keyword.
+  Not \mintinline{rust}{await X}, but \mintinline{rust}{X.await}.
+
+  \begin{minted}{rust}
+async fn sub() -> u8 {
+    42u8
+}
+
+fn main() {
+    println!("{}", sub().await)
+}
+  \end{minted}
+\end{frame}
+
+\begin{frame}[fragile]{async \& await}
+  \begin{minted}[fontsize=\scriptsize]{text}
+meisterluk@gardner ~ % rustc --edition=2018 async2.rs
+error[E0728]: `await` is only allowed inside `async`
+              functions and blocks
+ --> async2.rs:6:20
+  |
+5 | fn main() {
+  |    ---- this is not `async`
+6 |     println!("{}", sub().await)
+  |                    ^^^^^^^^^^^ only allowed
+  |         inside `async` functions and blocks
+
+error: aborting due to previous error
+
+For more information about this error, try `rustc --explain E0728`.
+  \end{minted}
+\end{frame}
+
+\begin{frame}[fragile]{async \& await}
+  So who can call the first async function? the \emph{executor} (scheduler)
+  \begin{itemize}
+    \item e.g. \href{https://crates.io/crates/async-std}{async-std}, \href{https://crates.io/crates/smol}{smol}, \href{https://crates.io/crates/tokio}{tokio}
+    \item executor is thus exchangable
+    \item executor allocates memory per future
+    \item futures are like state machines between states
+  \end{itemize}
+  the \emph{reactor}:
+  \begin{itemize}
+    \item Executor: is future X ready to go? Yes, then go. Else:
+    \item Reactor: I will take care of the future and report back when its ready
+  \end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]{async \& await}
+  \begin{minted}{rust}
+use smol::io;
+  
+async fn sub() -> u8 {
+  42u8
+}
+
+
+fn main() -> io::Result<()> {
+    smol::run(async {
+        println!("{}", sub().await);
+        Ok(())
+    })
+    // prints 42
+}
+  \end{minted}
+\end{frame}
+
+\begin{frame}[fragile]{async \& await}
+  \begin{minted}{rust}
+async fn sub() -> u8 {
+    42u8
+}
+
+fn main() {
+    async {
+        println!("{}", sub().await)
+    };
+}
+  \end{minted}
+\end{frame}
+
+\begin{frame}[fragile]{async \& await}
+  \begin{minted}[fontsize=\small]{text}
+meisterluk@gardner ~ % rustc --edition=2018 async3.rs
+warning: unused implementer of `std::future::Future`
+         that must be used
+ --> async3.rs:6:5
+  |
+6 | /     async {
+7 | |         println!("{}", sub().await)
+8 | |     };
+  | |______^
+  |
+  = note: `#[warn(unused_must_use)]` on by default
+  = note: futures do nothing unless you `.await`
+          or poll them
+
+warning: 1 warning emitted
+
+meisterluk@gardner ~ % ./async3    # prints nothing
+  \end{minted}
+\end{frame}
+
+\begin{frame}[fragile]{async \& await}
+  Other async/await implementations:
+  \begin{itemize}
+    \item Calling an async function, schedules it
+    \item Javascript calls \emph{Promise}, what rust calls \emph{Future}
+    \item Green threads: a scheduler is compiled in every executable to manage small threads (M:N threading) (not OS threads!) (e.g. erlang, golang goroutines). rust 1.0 dropped green threads.
+  \end{itemize}
+  Rust implementations:
+  \begin{itemize}
+    \item Zero-cost: only await schedules the function (\enquote{lazy})
+  \end{itemize}
+
+
+    \href{https://crates.io/crates/futures}{futures}, an official Rust crate that lives in the rust-lang repository
+    A runtime of your choosing, such as Tokio, async_std, smol, etc.
+
+\end{frame}
+
+\begin{frame}[fragile]{async \& await}
+  \begin{minted}[fontsize=\scriptsize]{rust}
+fn get_two_sites() {
+  // Spawn two threads to do work.
+  let thread_one = thread::spawn(|| download("https://foo.com"));
+  let thread_two = thread::spawn(|| download("https://bar.com"));
+
+  // Wait for both threads to complete.
+  thread_one.join().expect("thread one panicked");
+  thread_two.join().expect("thread two panicked");
+}
+  \end{minted}
+  threading approach via \href{https://rust-lang.github.io/async-book/01_getting_started/02_why_async.html}{async-book}
+\end{frame}
+
+\begin{frame}[fragile]{async \& await}
+  \begin{minted}[fontsize=\scriptsize]{rust}
+async fn get_two_sites_async() {
+  // Create two different "futures" which, when run to completion,
+  // will asynchronously download the webpages.
+  let future_one = download_async("https://foo.com");
+  let future_two = download_async("https://bar.com");
+
+  // Run both futures to completion at the same time.
+  join!(future_one, future_two);
+}
+  \end{minted}
+  async approach via \href{https://rust-lang.github.io/async-book/01_getting_started/02_why_async.html}{async-book}
+\end{frame}
+
+\begin{frame}[fragile]{async \& await summary}
+  \begin{itemize}
+    \item Async-await is a way to write functions that can "pause", return control to the runtime, and then pick up from where they left off
+    \item proposed 2016, didn't make edition 2018, landed in rust 1.39
+    \item Memory management
+    \item \href{https://docs.rs/crate/wasm-bindgen-futures/0.4.17}{wasm-bindgen-futures} binds Rust Future to Javascript Promise
+  \end{itemize}
+\end{frame}
+
+
+
+
+
+
+
+
+
+
+
+\begin{frame}[fragile]{async \& await summary}
+locking
+-------
+
+mutex → drop
+semaphores
+condvars
+Arc
+atomic operations
+
+{FnOnce, FnMut, Fn}
+
+threading
+---------
+
+thread::spawn
+Arc
+Sync, Send traits
+lightweight threads?
+channels
+which stdlib fn is threadsafe
+typical producer-consumer example
+sync \& await
+memory ordering / barrier
+move data structures between threads
+future
+\#CPUs
+Executer takes \# of concurrent units
+
+multiprocessing \& IPC
+---------------------
+
+shared memory
+pipes
+temp files
+mmap
+\end{frame}
+
+\begin{frame}[fragile]{TODO}
+  TODO smaller source code
+
+  \begin{minted}[fontsize=\footnotesize]{rust}
+/// Desugar `ExprKind::Try` from: `<expr>?` into:
+/// ```rust
+/// match Try::into_result(<expr>) {
+///   Ok(val) => #[allow(unreachable_code)] val,
+///   Err(err) =>
+///     #[allow(unreachable_code)]
+///     // If there is an enclosing `try {...}`:
+///     break 'catch_target Try::from_error(From::from(err)),
+///     // Otherwise:
+///     return Try::from_error(From::from(err)),
+/// }
+/// ```
+  \end{minted}
+
+  via \href{https://github.com/rust-lang/rust/blob/b613c989594f1cbf0d4af1a7a153786cca7792c8/src/librustc_ast_lowering/expr.rs#L1166}{expr.rs line 1166},
+  \mintinline{text}{try {…}} is \href{https://github.com/rust-lang/rust/issues/31436}{experimental}.
+\end{frame}
+
+
+\section{Epilogue}
+
+
+\begin{frame}[fragile]{Quiz}
+  % for copy & paste: \mintinline{rust}{TODO}
+  \begin{description}
+    \item[TODO Q1] \hfill{} \\
+      ~\uncover<2->{TODO A1}
+    \item[TODO Q2] \hfill{} \\
+      ~\uncover<3->{TODO}
+    \item[TODO Q3?] \hfill{} \\
+      ~\uncover<4->{TODO}
+    \item[TODO Q4] \hfill{} \\
+      ~\uncover<5->{TODO}
+  \end{description}
+\end{frame}
+
+
+\begin{frame}[fragile]{Next time}
+  \begin{tabular}{ll}
+    Next meetup  & Wed, 2020/08/26 \\
+    Topic        & I/O (files, file formats, simple TCP server)
+  \end{tabular}
+\end{frame}
+
+\begin{frame}[standout]
+  Thank you!
+
+  \includegraphics[width=40pt]{images/rustacean-flat-happy.png}
+\end{frame}
+
+\end{document}
