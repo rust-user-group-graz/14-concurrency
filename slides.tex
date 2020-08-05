@@ -509,19 +509,78 @@ fn foo() {
   % http://huonw.github.io/blog/2015/08/simd-in-rust/ (2015 though!)
 \end{frame}
 
+% TODO Arc
+% TODO atomic operations
+% memory ordering / barrier
+
+
 \begin{frame}[standout]
-  On instruction-level
+  On blocks of code
 \end{frame}
+
+% TODO mutex → drop
+% semaphores
+% condvars
 
 \begin{frame}[standout]
   On OS thread level
 \end{frame}
 
+% TODO {FnOnce, FnMut, Fn}
+% thread::spawn
+% Sync, Send traits
+
+% lightweight threads?
+% channels
+% which stdlib fn is threadsafe
+% typical producer-consumer example
+% move data structures between threads
+
 \begin{frame}[fragile]{threads}
-  Copy stack, share heap.
+  Copy stack (expensive?), share heap.
+\end{frame}
+
+\begin{frame}[fragile]{Mutex}
   \begin{itemize}
-    \item rust uses the LLVM stack, which implements \emph{auto-vectorization}
+    \item \enquote{A mutual exclusion primitive useful for protecting shared data}
+    \item A mutex can be \mintinline{rust}{lock}ed (true/blocked) or released
+    \item Also \mintinline{rust}{try_lock} (true/false)
+    \item Only one concurrent unit can hold a lock simultaneously
+    \item If the mutex lock goes out of scope, another unit can acquire the lock.
   \end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]{Mutex}
+  \begin{minted}{rust}
+use std::sync::Mutex;
+  
+fn main() {
+    let val = Mutex::new(0u8);
+    {
+        *val.lock().unwrap() += 1;
+        *val.lock().unwrap() += 1;
+        *val.lock().unwrap() += 1;
+    }
+    println!("{}", val.lock().unwrap());
+}
+  \end{minted}
+\end{frame}
+
+\begin{frame}[fragile]{Mutex}
+  \begin{minted}{rust}
+use std::sync::{Arc, Mutex};
+use std::thread;
+
+fn main() {
+    let mutex = Arc::new(Mutex::new(0));
+    let c_mutex = mutex.clone();
+
+    thread::spawn(move || {
+        *c_mutex.lock().unwrap() = 10;
+    }).join().expect("thread::spawn failed");
+    println!("{}", *mutex.lock().unwrap());
+}
+  \end{minted}
 \end{frame}
 
 \begin{frame}[standout]
@@ -736,91 +795,56 @@ async fn get_two_sites_async() {
   \end{itemize}
 \end{frame}
 
-
-
-
-
-
-
-
-
-
-
-\begin{frame}[fragile]{async \& await summary}
-locking
--------
-
-mutex → drop
-semaphores
-condvars
-Arc
-atomic operations
-
-{FnOnce, FnMut, Fn}
-
-threading
----------
-
-thread::spawn
-Arc
-Sync, Send traits
-lightweight threads?
-channels
-which stdlib fn is threadsafe
-typical producer-consumer example
-sync \& await
-memory ordering / barrier
-move data structures between threads
-future
-\#CPUs
-Executer takes \# of concurrent units
-
-multiprocessing \& IPC
----------------------
-
-shared memory
-pipes
-temp files
-mmap
+\begin{frame}[standout]
+  On process-level
 \end{frame}
 
-\begin{frame}[fragile]{TODO}
-  TODO smaller source code
+% IPC
+% shared memory
+% pipes
+% temp files
+% mmap
 
-  \begin{minted}[fontsize=\footnotesize]{rust}
-/// Desugar `ExprKind::Try` from: `<expr>?` into:
-/// ```rust
-/// match Try::into_result(<expr>) {
-///   Ok(val) => #[allow(unreachable_code)] val,
-///   Err(err) =>
-///     #[allow(unreachable_code)]
-///     // If there is an enclosing `try {...}`:
-///     break 'catch_target Try::from_error(From::from(err)),
-///     // Otherwise:
-///     return Try::from_error(From::from(err)),
-/// }
-/// ```
-  \end{minted}
-
-  via \href{https://github.com/rust-lang/rust/blob/b613c989594f1cbf0d4af1a7a153786cca7792c8/src/librustc_ast_lowering/expr.rs#L1166}{expr.rs line 1166},
-  \mintinline{text}{try {…}} is \href{https://github.com/rust-lang/rust/issues/31436}{experimental}.
+\begin{frame}[standout]
+  But how many units?
 \end{frame}
 
+\begin{frame}[fragile]{How many concurrent units?}
+  \textbf{How many?} Difficult.
+  \begin{itemize}
+    \item CPU cycles per instruction differs, caches everywhere!
+    \item Thus, \textbf{benchmark, benchmark, benchmark!}
+  \end{itemize}
+  But how?
+  \begin{itemize}
+    \item No stable stdlib support in rust!
+    \item \href{https://github.com/rust-lang/rust/issues/29553}{RFC 29553: Tracking issue for #[bench] and benchmarking support}
+    \item e.g. \href{https://crates.io/crates/criterion}{criterion} crate
+  \end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]{How many concurrent units?}
+  \textbf{Heuristics:}
+  \begin{itemize}
+    \item \href{https://github.com/rust-lang/rfcs/pull/985}{RFC 985: Add \mintinline{rust}{std::env::concurrency_hint}}
+    \item \href{https://crates.io/crates/num_cpus}{num\_cpus} crate: \mintinline{rust}{num_cpus::get();}
+    \item \texttt{dupfiles-go} and \href{https://github.com/BurntSushi/ripgrep/}{ripgrep} experience: the number of concurrent units reading files should roughly correspond to the number of logical CPUs
+  \end{itemize}
+\end{frame}
 
 \section{Epilogue}
 
 
 \begin{frame}[fragile]{Quiz}
-  % for copy & paste: \mintinline{rust}{TODO}
   \begin{description}
-    \item[TODO Q1] \hfill{} \\
-      ~\uncover<2->{TODO A1}
-    \item[TODO Q2] \hfill{} \\
-      ~\uncover<3->{TODO}
-    \item[TODO Q3?] \hfill{} \\
-      ~\uncover<4->{TODO}
-    \item[TODO Q4] \hfill{} \\
-      ~\uncover<5->{TODO}
+    \item[What does SIMD stand for?] \hfill{} \\
+      ~\uncover<2->{Single Instruction, Multiple Data}
+    \item[What is a mutex?] \hfill{} \\
+      ~\uncover<3->{a data structure to give mutually exclusive access to a code section}
+    \item[What is a future?] \hfill{} \\
+      ~\uncover<4->{represents a value, that is not ready yet}
+    \item[Heuristically, what might be a good number of concurrent units?]
+      ~\uncover<5->{number of logical CPUs of the machine}
   \end{description}
 \end{frame}
 
