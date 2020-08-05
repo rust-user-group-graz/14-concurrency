@@ -83,6 +83,7 @@ rustc is a multi-pass compiler: AST → HIR → MIR → LLVM-IR
 \begin{frame}[fragile]{Recap: Rust 2021 edition Talk}
   \begin{minted}[fontsize=\small]{text}
 meisterluk@gardner ~ % cat test.rs
+
 fn async() -> u64 {
     42
 }
@@ -98,6 +99,7 @@ meisterluk@gardner ~ % rustc test.rs
 \begin{frame}[fragile]{Recap: Rusty days}
   \begin{minted}[fontsize=\small]{text}
 meisterluk@gardner ~ % rustc --edition=2018 test.rs
+
 error: expected identifier, found keyword `async`
  --> test.rs:1:4
   |
@@ -327,13 +329,12 @@ help: you can escape reserved keywords
 \end{frame}
 
 \begin{frame}[fragile]{Models of concurrency}
-  For example, Erlang is famous for its distributed computational model.
-
   But, in rust, we stick to a von-Neumann-like model:
   \begin{itemize}
     \item Instructions are executed in order.
     \item We have stacks, heaps, bss and data sections to organize the memory.
     \item We make syscalls to the kernel and compile against some ISA.
+    \item There is \textbf{no} runtime compiled into every executable (improves C interoperability)
   \end{itemize}
   Thus it is a question of an API. We define \emph{concurrent units} and they might run in \emph{parallel}.
 \end{frame}
@@ -342,7 +343,7 @@ help: you can escape reserved keywords
   Concurrency as a question of level of granularity:
   \begin{enumerate}
     \item Instruction
-    \item blocks of instructions
+    \item Blocks of instructions
     \item Function
     \item Several stacks, one heap
     \item Process
@@ -509,35 +510,57 @@ fn foo() {
   % http://huonw.github.io/blog/2015/08/simd-in-rust/ (2015 though!)
 \end{frame}
 
-% TODO Arc
-% TODO atomic operations
-% memory ordering / barrier
+\begin{frame}[fragile]{Atomic instructions}
+  All atomic types in this module are guaranteed to be lock-free if they're available.
 
-
-\begin{frame}[standout]
-  On blocks of code
+  \vspace{15pt}
+  \begin{minipage}[l]{0.45\textwidth}
+    \begin{itemize}
+      \item AtomicBool,
+      \item AtomicI8,
+      \item AtomicI16,
+      \item AtomicI32,
+      \item AtomicI64,
+      \item AtomicIsize,
+    \end{itemize}
+  \end{minipage}
+  \begin{minipage}[l]{0.45\textwidth}
+    \begin{itemize}
+      \item AtomicPtr,
+      \item AtomicU8,
+      \item AtomicU16,
+      \item AtomicU32,
+      \item AtomicU64,
+      \item AtomicUsize
+    \end{itemize}
+  \end{minipage}
 \end{frame}
 
-% TODO mutex → drop
-% semaphores
-% condvars
+\begin{frame}[fragile]{AtomicU64 example}
+  \begin{minted}[fontsize=\small]{rust}
+use std::sync::atomic::{AtomicU64, Ordering};
+  
+fn main() {
+    let uint = AtomicU64::new(41);
+    uint.store(42, Ordering::SeqCst);
+    println!("{}", uint.load(Ordering::SeqCst));
+}
+  \end{minted}
 
-\begin{frame}[standout]
-  On OS thread level
+  Memory orderings?
+
+  \begin{minted}[fontsize=\small]{rust}
+pub enum Ordering {
+  Relaxed, Release, Acquire,
+  AcqRel, SeqCst,
+}
+  \end{minted}
+
+  Rust's memory orderings are the same as those of C++20.
 \end{frame}
 
-% TODO {FnOnce, FnMut, Fn}
-% thread::spawn
-% Sync, Send traits
-
-% lightweight threads?
-% channels
-% which stdlib fn is threadsafe
-% typical producer-consumer example
-% move data structures between threads
-
-\begin{frame}[fragile]{threads}
-  Copy stack (expensive?), share heap.
+\begin{frame}[standout]
+  On blocks of instructions
 \end{frame}
 
 \begin{frame}[fragile]{Mutex}
@@ -583,8 +606,154 @@ fn main() {
   \end{minted}
 \end{frame}
 
+\begin{frame}[fragile]{Mutex poisoning}
+  \begin{quote}
+The mutexes in this module implement a strategy called \emph{poisoning} where a mutex is considered poisoned whenever a thread panics while holding the mutex. Once a mutex is poisoned, all other threads are unable to access the data by default as it is likely tainted (some invariant is not being upheld). \\
+    ---Struct \href{https://doc.rust-lang.org/std/sync/struct.Mutex.html}{\mintinline{rust}{std::sync::Mutex}}
+  \end{quote}
+\end{frame}
+
+\begin{frame}[fragile]{Mutex poisoning}
+  A poisoned mutex, however, does not prevent all access to the underlying data.
+
+  \begin{minted}{rust}
+let mut guard = match lock.lock() {
+    Ok(guard) => guard,
+    Err(poisoned) => poisoned.into_inner(),
+};
+
+*guard += 1;
+  \end{minted}
+\end{frame}
+
+\begin{frame}[fragile]{std::sync}
+  \mintinline{rust}{std::sync} members:
+
+  \begin{itemize}
+    \item \href{https://doc.rust-lang.org/std/sync/struct.Arc.html}{Arc}: A thread-safe reference-counting pointer. 'Arc' stands for 'Atomically Reference Counted'.
+    \item \href{https://doc.rust-lang.org/std/sync/struct.Barrier.html}{Barrier}: A barrier enables multiple threads to synchronize the beginning of some computation.
+    \item \href{https://doc.rust-lang.org/std/sync/struct.Condvar.html}{CondVar}: A Condition Variable
+    \item \href{https://doc.rust-lang.org/std/sync/mpsc/index.html}{mpsc}: Multi-producer, single-consumer FIFO queue communication primitives
+    \item \href{https://doc.rust-lang.org/std/sync/struct.Once.html}{Once}: A synchronization primitive which can be used to run a one-time global initialization
+    \item \href{https://doc.rust-lang.org/std/sync/struct.RwLock.html}{RwLock:} A reader-writer lock (number of readers or at most one writer at any point in time)
+  \end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]{Barrier example}
+  \begin{minted}[fontsize=\scriptsize]{rust}
+use std::sync::{Arc, Barrier};
+use std::thread;
+
+let mut handles = Vec::with_capacity(10);
+let barrier = Arc::new(Barrier::new(10));
+for _ in 0..10 {
+    let c = barrier.clone();
+    // The same messages will be printed together.
+    // You will NOT see any interleaving.
+    handles.push(thread::spawn(move|| {
+        println!("before wait");
+        c.wait();
+        println!("after wait");
+    }));
+}
+// Wait for other threads to finish.
+for handle in handles {
+    handle.join().unwrap();
+}
+  \end{minted}
+\end{frame}
+
+\begin{frame}[fragile]{mpsc channels}
+  \begin{minted}[fontsize=\scriptsize]{rust}
+use std::thread;
+use std::sync::mpsc::channel;
+
+// Create a shared channel that can be sent along
+// from many threads where tx is the sending half
+// (tx for transmission), and rx is the receiving
+// half (rx for receiving).
+let (tx, rx) = channel();
+for i in 0..10 {
+    let tx = tx.clone();
+    thread::spawn(move|| {
+        tx.send(i).unwrap();
+    });
+}
+
+for _ in 0..10 {
+    let j = rx.recv().unwrap();
+    assert!(0 <= j && j < 10);
+}
+  \end{minted}
+\end{frame}
+
+\begin{frame}[standout]
+  On OS thread level
+\end{frame}
+
+\begin{frame}[fragile]{threads}
+  \begin{minted}[fontsize=\scriptsize]{rust}
+use std::thread;
+
+fn main() {
+  let handler = thread::spawn(|| {
+    // thread code
+  });
+
+  handler.join().unwrap();
+}
+  \end{minted}
+
+  Copy stack (expensive?), share heap.
+\end{frame}
+
+\begin{frame}[fragile]{threads}
+  Open topics:
+  \begin{itemize}
+    \item \texttt{move} keyword captures variables from the outside: 
+    \item \href{https://doc.rust-lang.org/std/marker/trait.Sync.html}{Sync}, \href{https://doc.rust-lang.org/std/marker/trait.Send.html}{Send} traits
+    \item Which stdlib fn is threadsafe? indicated by traits
+  \end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]{threads}
+  \begin{quote}
+Simplifying things a bit, if the value is only read, it is captured by shared reference. If it is written, it is captured by mutable reference. If it is moved away from the closure, it is moved in.
+  \end{quote}
+\end{frame}
+
 \begin{frame}[standout]
   async \& await
+\end{frame}
+
+\begin{frame}[fragile]{async \& await}
+  \begin{minted}[fontsize=\scriptsize]{rust}
+fn get_two_sites() {
+  // Spawn two threads to do work.
+  let thread_one = thread::spawn(|| download("https://foo.com"));
+  let thread_two = thread::spawn(|| download("https://bar.com"));
+
+  // Wait for both threads to complete.
+  thread_one.join().expect("thread one panicked");
+  thread_two.join().expect("thread two panicked");
+}
+  \end{minted}
+  threading approach via \href{https://rust-lang.github.io/async-book/01_getting_started/02_why_async.html}{async-book}
+\end{frame}
+
+\begin{frame}[fragile]{async \& await}
+  \begin{minted}[fontsize=\scriptsize]{rust}
+async fn get_two_sites_async() {
+  // Create two different "futures" which, when run to completion,
+  // will asynchronously download the webpages.
+  let future_one = download_async("https://foo.com");
+  let future_two = download_async("https://bar.com");
+
+  // Run both futures to completion at the same time.
+  join!(future_one, future_two);
+}
+  \end{minted}
+  async approach via \href{https://rust-lang.github.io/async-book/01_getting_started/02_why_async.html}{async-book}
 \end{frame}
 
 \begin{frame}[fragile]{async \& await}
@@ -605,6 +774,7 @@ fn main() {
 \begin{frame}[fragile]{async \& await}
   \begin{minted}[fontsize=\scriptsize]{text}
 meisterluk@gardner ~ % rustc --edition=2018 async1.rs
+
 error[E0277]: `impl std::future::Future`
               doesn't implement `std::fmt::Display`
  --> async1.rs:6:20
@@ -652,6 +822,7 @@ fn main() {
 \begin{frame}[fragile]{async \& await}
   \begin{minted}[fontsize=\scriptsize]{text}
 meisterluk@gardner ~ % rustc --edition=2018 async2.rs
+
 error[E0728]: `await` is only allowed inside `async`
               functions and blocks
  --> async2.rs:6:20
@@ -676,11 +847,18 @@ For more information about this error, try `rustc --explain E0728`.
     \item executor allocates memory per future
     \item futures are like state machines between states
   \end{itemize}
-  the \emph{reactor}:
+  Components:
   \begin{itemize}
     \item Executor: is future X ready to go? Yes, then go. Else:
-    \item Reactor: I will take care of the future and report back when its ready
+    \item Reactor: I will take care of the future
+    \item Waker: Hey! We are ready, executor.
   \end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]{async \& await}
+  \begin{quote}
+    The core method of future, poll, attempts to resolve the future into a final value. This method does not block if the value is not ready. Instead, the current task is scheduled to be woken up when it's possible to make further progress by polling again. The context passed to the poll method can provide a Waker, which is a handle for waking up the current task.
+  \end{quote}
 \end{frame}
 
 \begin{frame}[fragile]{async \& await}
@@ -719,6 +897,7 @@ fn main() {
 \begin{frame}[fragile]{async \& await}
   \begin{minted}[fontsize=\small]{text}
 meisterluk@gardner ~ % rustc --edition=2018 async3.rs
+
 warning: unused implementer of `std::future::Future`
          that must be used
  --> async3.rs:6:5
@@ -748,49 +927,16 @@ meisterluk@gardner ~ % ./async3    # prints nothing
   Rust implementations:
   \begin{itemize}
     \item Zero-cost: only await schedules the function (\enquote{lazy})
+    \item Choose your own runtime
+    \item Futures trait with \mintinline{rust}{poll(self: Pin<&mut Self>, cx: &mut Context)} \mintinline{rust}{-> Poll<Self::Output>}
   \end{itemize}
-
-
-    \href{https://crates.io/crates/futures}{futures}, an official Rust crate that lives in the rust-lang repository
-    A runtime of your choosing, such as Tokio, async_std, smol, etc.
-
-\end{frame}
-
-\begin{frame}[fragile]{async \& await}
-  \begin{minted}[fontsize=\scriptsize]{rust}
-fn get_two_sites() {
-  // Spawn two threads to do work.
-  let thread_one = thread::spawn(|| download("https://foo.com"));
-  let thread_two = thread::spawn(|| download("https://bar.com"));
-
-  // Wait for both threads to complete.
-  thread_one.join().expect("thread one panicked");
-  thread_two.join().expect("thread two panicked");
-}
-  \end{minted}
-  threading approach via \href{https://rust-lang.github.io/async-book/01_getting_started/02_why_async.html}{async-book}
-\end{frame}
-
-\begin{frame}[fragile]{async \& await}
-  \begin{minted}[fontsize=\scriptsize]{rust}
-async fn get_two_sites_async() {
-  // Create two different "futures" which, when run to completion,
-  // will asynchronously download the webpages.
-  let future_one = download_async("https://foo.com");
-  let future_two = download_async("https://bar.com");
-
-  // Run both futures to completion at the same time.
-  join!(future_one, future_two);
-}
-  \end{minted}
-  async approach via \href{https://rust-lang.github.io/async-book/01_getting_started/02_why_async.html}{async-book}
 \end{frame}
 
 \begin{frame}[fragile]{async \& await summary}
   \begin{itemize}
     \item Async-await is a way to write functions that can "pause", return control to the runtime, and then pick up from where they left off
     \item proposed 2016, didn't make edition 2018, landed in rust 1.39
-    \item Memory management
+    \item Memory management was a major problem
     \item \href{https://docs.rs/crate/wasm-bindgen-futures/0.4.17}{wasm-bindgen-futures} binds Rust Future to Javascript Promise
   \end{itemize}
 \end{frame}
@@ -799,11 +945,33 @@ async fn get_two_sites_async() {
   On process-level
 \end{frame}
 
-% IPC
-% shared memory
-% pipes
-% temp files
-% mmap
+\begin{frame}[fragile]{Process}
+  \begin{minted}{rust}
+use std::process::Command;
+
+let output = Command::new("sh")
+        .arg("-c")
+        .arg("echo hello")
+        .output()
+        .expect("failed to execute process");
+
+let hello = output.stdout;
+  \end{minted}
+
+  via \href{https://doc.rust-lang.org/std/process/struct.Command.html}{\mintinline{rust}{std::process::Command}}
+\end{frame}
+
+\begin{frame}[fragile]{Process}
+  Open topics:
+
+  \begin{itemize}
+    \item Interprocess-communication (IPC)
+    \item Shared memory
+    \item Pipes
+    \item Temporary files
+    \item mmap
+  \end{itemize}
+\end{frame}
 
 \begin{frame}[standout]
   But how many units?
