@@ -124,8 +124,8 @@ help: you can escape reserved keywords
     \item type algebra
     \item unit \& never type
     \item memory layout (ABI) of composite types (struct, enum, futures)
-    \item struct Bar(u16, u8, u16, u8): \\
-          \texttt{C:    11 11 33 xx 22 22 44 xx}
+    \item struct Bar(u16, u8, u16, u8) = (1, 3, 2, 4): \\
+          \texttt{C: \hspace{13pt} 11 11 33 xx 22 22 44 xx} \\
           \texttt{Rust: 11 11 22 22 33 44}  (fields reordered)
     \item \mintinline{rust}{Option} uses a discriminator, \mintinline{rust}{Option<Option<u64>>} uses only one discriminator
     \item 41.2~\% of enums have no type arguments, 16.4~\% of enums have one type argument, 23.7~\% of enums have two type arguments
