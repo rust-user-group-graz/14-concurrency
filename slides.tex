@@ -516,21 +516,21 @@ fn foo() {
   \vspace{15pt}
   \begin{minipage}[l]{0.45\textwidth}
     \begin{itemize}
-      \item AtomicBool,
-      \item AtomicI8,
-      \item AtomicI16,
-      \item AtomicI32,
-      \item AtomicI64,
-      \item AtomicIsize,
+      \item AtomicBool
+      \item AtomicI8
+      \item AtomicI16
+      \item AtomicI32
+      \item AtomicI64
+      \item AtomicIsize
     \end{itemize}
   \end{minipage}
   \begin{minipage}[l]{0.45\textwidth}
     \begin{itemize}
-      \item AtomicPtr,
-      \item AtomicU8,
-      \item AtomicU16,
-      \item AtomicU32,
-      \item AtomicU64,
+      \item AtomicPtr
+      \item AtomicU8
+      \item AtomicU16
+      \item AtomicU32
+      \item AtomicU64
       \item AtomicUsize
     \end{itemize}
   \end{minipage}
@@ -708,11 +708,11 @@ fn main() {
 \end{frame}
 
 \begin{frame}[fragile]{threads}
-  Open topics:
+  Open topics (not covered):
   \begin{itemize}
     \item \texttt{move} keyword captures variables from the outside: 
-    \item \href{https://doc.rust-lang.org/std/marker/trait.Sync.html}{Sync}, \href{https://doc.rust-lang.org/std/marker/trait.Send.html}{Send} traits
-    \item Which stdlib fn is threadsafe? indicated by traits
+    \item \href{https://doc.rust-lang.org/std/marker/trait.Sync.html}{Sync}, \href{https://doc.rust-lang.org/std/marker/trait.Send.html}{Send} marker traits
+    \item Which stdlib fn is threadsafe? → indicated by traits
   \end{itemize}
 \end{frame}
 
@@ -895,7 +895,7 @@ fn main() {
 \end{frame}
 
 \begin{frame}[fragile]{async \& await}
-  \begin{minted}[fontsize=\small]{text}
+  \begin{minted}[fontsize=\scriptsize]{text}
 meisterluk@gardner ~ % rustc --edition=2018 async3.rs
 
 warning: unused implementer of `std::future::Future`
@@ -962,7 +962,7 @@ let hello = output.stdout;
 \end{frame}
 
 \begin{frame}[fragile]{Process}
-  Open topics:
+  Open topics (not covered):
 
   \begin{itemize}
     \item Interprocess-communication (IPC)
